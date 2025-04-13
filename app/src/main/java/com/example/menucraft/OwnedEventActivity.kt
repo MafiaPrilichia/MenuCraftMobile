@@ -1,13 +1,14 @@
 package com.example.menucraft
 
-import EventActivity
+import android.app.Activity.RESULT_OK
 import android.content.Intent
-import android.icu.text.SimpleDateFormat
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,7 +47,7 @@ import kotlinx.coroutines.flow.StateFlow
 import java.time.format.DateTimeFormatter
 
 class OwnedEventActivity : ComponentActivity() {
-    private val TAG = "EventActivity" // Для логирования
+    private val TAG = "com.example.menucraft.EventActivity" // Для логирования
 
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,55 +67,95 @@ fun OwnedEventScreen(authToken: String, vm: OwnedEventViewModel = viewModel()) {
     val events by vm.events.collectAsState(initial = emptyList())
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf("") }
+    val context = LocalContext.current
 
-    // Логирование при загрузке данных
-    LaunchedEffect(Unit) {
-        Log.d("EventScreen", "Загружаем мероприятия для токена: $authToken")
+    var shouldRefresh by remember { mutableStateOf(false) }
+
+    // 🔁 Обновление данных
+    LaunchedEffect(shouldRefresh) {
+        isLoading = true
+        errorMessage = ""
         try {
             vm.getOwnedEvents(authToken)
-            Log.d("EventScreen", "Мероприятия успешно загружены")
-            isLoading = false
         } catch (e: Exception) {
             errorMessage = "Ошибка при загрузке мероприятий"
-            Log.e("EventScreen", "Ошибка при загрузке мероприятий: ${e.message}", e)
+        } finally {
             isLoading = false
+            shouldRefresh = false
         }
     }
 
-    // Отображение UI
-    if (isLoading) {
-        CircularProgressIndicator(modifier = Modifier.fillMaxSize())
-    } else if (errorMessage.isNotEmpty()) {
-        Text(text = errorMessage, color = Color.Red)
-    } else {
-        LazyColumn {
-            items(events) { event ->
-                EventItem(event = event, onClick = {
-                    // Переход на экран с полной информацией о мероприятии
-                    val context = LocalContext.current
-                    val intent = Intent(context, EventActivity::class.java).apply {
-                        putExtra("event_id", event.id)
+    // 🎯 Launcher для открытия EventActivity и CreateEventActivity
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            shouldRefresh = true
+        }
+    }
+
+    Scaffold(
+        floatingActionButton = {
+            androidx.compose.material3.FloatingActionButton(
+                onClick = {
+                    val intent = Intent(context, CreateEventActivity::class.java).apply {
                         putExtra("jwt_token", authToken)
                     }
-                    context.startActivity(intent)
-                })
+                    launcher.launch(intent)
+                },
+                containerColor = Color(0xFF6200EE),
+                contentColor = Color.White
+            ) {
+                Text("+", fontSize = 24.sp)
+            }
+        }
+    ) { innerPadding ->
+        if (isLoading) {
+            CircularProgressIndicator(modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding))
+        } else if (errorMessage.isNotEmpty()) {
+            Text(
+                text = errorMessage,
+                color = Color.Red,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .padding(innerPadding)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(8.dp)
+            ) {
+                items(events) { event ->
+                    EventItem(event = event, onClick = {
+                        val intent = Intent(context, EventActivity::class.java).apply {
+                            putExtra("event_id", event.id)
+                            putExtra("jwt_token", authToken)
+                        }
+                        launcher.launch(intent)
+                    })
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }
 }
 
 
+
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun EventItem(event: EventShort, onClick: @Composable () -> Unit) {
+fun EventItem(event: EventShort, onClick: () -> Unit) { // <-- Исправили тип onClick
     val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
     val formattedDate = event.eventDate.format(formatter)
 
-    // Карточка для мероприятия
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick), // <-- Теперь совпадает с ожидаемым типом
         shape = RoundedCornerShape(8.dp),
         color = Color(0xFFF1F1F1),
         shadowElevation = 4.dp
@@ -160,13 +202,13 @@ fun EventItem(event: EventShort, onClick: @Composable () -> Unit) {
     }
 }
 
-
+@RequiresApi(Build.VERSION_CODES.O)
 class OwnedEventViewModel : ViewModel() {
     private val apiService = RetrofitInstance.apiService
     private val _events = MutableStateFlow<List<EventShort>>(emptyList())
     val events: StateFlow<List<EventShort>> = _events
 
-    private val TAG = "EventViewModel" // Для логирования
+    private val TAG = "com.example.menucraft.EventViewModel" // Для логирования
 
     suspend fun getOwnedEvents(authToken: String) {
         Log.d(TAG, "getOwnedEvents: Загружаем мероприятия для токена $authToken")

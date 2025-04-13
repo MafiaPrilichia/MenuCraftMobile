@@ -4,21 +4,15 @@ import com.example.menucraft.util.LocalDateTimeAdapter
 import com.google.gson.annotations.JsonAdapter
 import java.time.LocalDateTime
 
-data class Event(
-    val id: Long,
+data class EventCRUD(
     val name: String,
     val theme: String,
 
     @JsonAdapter(LocalDateTimeAdapter::class)
+    //@JsonFormat(pattern = "dd.MM.yyyy HH:mm")
     val eventDate: LocalDateTime,
 
     val location: String,
     val description: String,
     val guests: Int,
-
-    @JsonAdapter(LocalDateTimeAdapter::class)
-    val createdAt: LocalDateTime?,
-
-    @JsonAdapter(LocalDateTimeAdapter::class)
-    val updatedAt: LocalDateTime?
 )
