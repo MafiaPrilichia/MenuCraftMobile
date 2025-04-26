@@ -1,8 +1,12 @@
 package com.example.menucraft.util
 
+import com.example.menucraft.data.Category
 import com.example.menucraft.data.Event
 import com.example.menucraft.data.EventCRUD
+import com.example.menucraft.data.EventRecipe
+import com.example.menucraft.data.EventRecipeShow
 import com.example.menucraft.data.EventShort
+import com.example.menucraft.data.Recipe
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -11,6 +15,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface ApiService {
     @POST("/auth/login")
@@ -49,6 +54,45 @@ interface ApiService {
         @Path("id") eventId: Long,
         @Header("Authorization") authToken: String
     ): Response<Unit>
+
+    @GET("event/recipe/{id}")
+    suspend fun getEventRecipes(
+        @Path("id") eventId: Long,
+        @Header("Authorization") authToken: String
+    ): List<EventRecipeShow>
+
+    @GET("recipe/user")
+    suspend fun getUserRecipes(@Header("Authorization") auth: String): List<Recipe>
+
+    @GET("recipe/user")
+    suspend fun getUserRecipesFiltered(
+        @Header("Authorization") auth: String,
+        @Query("categoryIds") categoryIds: String
+    ): List<Recipe>
+
+    @POST("event/recipe")
+    suspend fun addRecipeToEvent(
+        @Header("Authorization") auth: String,
+        @Body body: EventRecipe
+    ): Response<EventRecipe>
+
+    @PUT("event/recipe")
+    suspend fun updateEventRecipe(
+        @Header("Authorization") auth: String,
+        @Body body: EventRecipe
+    ): Response<EventRecipe>
+
+    @DELETE("event/recipe")
+    suspend fun deleteEventRecipe(
+        @Header("Authorization") auth: String,
+        @Query("eventId") eventId: Int,
+        @Query("recipeId") recipeId: Int
+    ): Response<Void>
+
+    @GET("category")
+    suspend fun getCategories(
+        @Header("Authorization") auth: String
+    ): List<Category>
 }
 
 data class AuthRequest(val username: String, val password: String)
