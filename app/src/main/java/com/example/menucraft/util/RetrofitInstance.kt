@@ -10,8 +10,8 @@ import java.time.LocalDateTime
 
 @RequiresApi(Build.VERSION_CODES.O)
 object RetrofitInstance {
-    private const val BASE_URL = "http://192.168.1.140:8080" // main pc
-    //private const val BASE_URL = "http://192.168.1.140:8080"  // laptop
+    //private const val BASE_URL = "http://192.168.1.140:8080" // main pc
+    private const val BASE_URL = "http://192.168.1.135:8080"  // laptop
 
     private val gson: Gson = GsonBuilder()
         .registerTypeAdapter(LocalDateTime::class.java, LocalDateTimeAdapter())

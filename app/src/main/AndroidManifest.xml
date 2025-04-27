@@ -38,6 +38,10 @@
             android:exported="true"/>
         <activity android:name=".RecipeListActivity"
             android:exported="true"/>
+        <activity android:name=".CreateRecipeActivity"
+            android:exported="true"/>
+        <activity android:name=".RecipeActivity"
+            android:exported="true"/>
     </application>
 
 </manifest>

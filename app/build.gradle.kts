@@ -62,6 +62,7 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("io.github.vanpra.compose-material-dialogs:datetime:0.9.0")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.13.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-android:2.8.7")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

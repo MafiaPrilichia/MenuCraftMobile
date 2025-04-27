@@ -7,6 +7,7 @@ import com.example.menucraft.data.EventRecipe
 import com.example.menucraft.data.EventRecipeShow
 import com.example.menucraft.data.EventShort
 import com.example.menucraft.data.Recipe
+import com.example.menucraft.data.RecipeCRUD
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -93,6 +94,24 @@ interface ApiService {
     suspend fun getCategories(
         @Header("Authorization") auth: String
     ): List<Category>
+
+    @POST("/recipe")
+    suspend fun createRecipe(
+        @Header("Authorization") authToken: String,
+        @Body recipe: RecipeCRUD
+    ): Response<RecipeCRUD>
+
+    @GET("recipe/{id}")
+    suspend fun getRecipeById(
+        @Path("id") recipeId: Long,
+        @Header("Authorization") authToken: String
+    ): Recipe
+
+    @DELETE("/recipe/{id}")
+    suspend fun deleteRecipe(
+        @Path("id") recipeId: Long,
+        @Header("Authorization") authToken: String
+    ): Response<Unit>
 }
 
 data class AuthRequest(val username: String, val password: String)

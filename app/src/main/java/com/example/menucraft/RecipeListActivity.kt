@@ -1,14 +1,17 @@
 package com.example.menucraft
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +38,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,6 +73,16 @@ class RecipeListActivity : ComponentActivity() {
 
     private val viewModel: RecipeListViewModel by viewModels()
 
+    private val createRecipeLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            // Рецепт создан, обновляем список
+            val authToken = intent.getStringExtra("jwt_token") ?: ""
+            viewModel.loadRecipes(authToken)
+        }
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,7 +102,7 @@ class RecipeListActivity : ComponentActivity() {
             val errorMessage by viewModel.errorMessage.collectAsState()
             val addedRecipeIds by viewModel.addedRecipeIds.collectAsState()
 
-            var selectedRecipe by remember { mutableStateOf<Recipe?>(null) }
+            var selectedRecipeShort by remember { mutableStateOf<Recipe?>(null) }
             var showDialog by remember { mutableStateOf(false) }
             var dropdownExpanded by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
@@ -115,6 +129,24 @@ class RecipeListActivity : ComponentActivity() {
             Scaffold(
                 topBar = {
                     TopAppBar(title = { Text("Выбор блюда") })
+                },
+                floatingActionButton = {
+                    FloatingActionButton(
+                        onClick = {
+                            val intent = Intent(this, CreateRecipeActivity::class.java)
+                            intent.putExtra("jwt_token", authToken)
+                            createRecipeLauncher.launch(intent)
+                        },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Добавить рецепт"
+                        )
+                    }
                 }
             ) { paddingValues ->
                 Box(modifier = Modifier.padding(paddingValues)) {
@@ -197,11 +229,17 @@ class RecipeListActivity : ComponentActivity() {
                                         RecipeListItem(
                                             recipe = recipe,
                                             isAdded = addedRecipeIds.contains(recipe.id),
-                                            onClick = {
+                                            onAddClick = {
                                                 if (!addedRecipeIds.contains(recipe.id)) {
-                                                    selectedRecipe = recipe
+                                                    selectedRecipeShort = recipe
                                                     showDialog = true
                                                 }
+                                            },
+                                            onRecipeClick = {
+                                                // Переход на RecipeActivity с передачей ID рецепта
+                                                val intent = Intent(context, RecipeActivity::class.java)
+                                                intent.putExtra("recipe_id", recipe.id)
+                                                context.startActivity(intent)
                                             }
                                         )
                                     }
@@ -209,7 +247,7 @@ class RecipeListActivity : ComponentActivity() {
                             }
                         }
 
-                        if (showDialog && selectedRecipe != null) {
+                        if (showDialog && selectedRecipeShort != null) {
                             PortionsDialog(
                                 onConfirm = { portions ->
                                     showDialog = false
@@ -217,7 +255,7 @@ class RecipeListActivity : ComponentActivity() {
                                         viewModel.addRecipeToEvent(
                                             authToken,
                                             eventId,
-                                            selectedRecipe!!.id,
+                                            selectedRecipeShort!!.id,
                                             portions,
                                             onSuccess = {
                                                 Toast.makeText(context, "Блюдо добавлено", Toast.LENGTH_SHORT).show()
@@ -353,12 +391,14 @@ class RecipeListViewModel : ViewModel() {
 fun RecipeListItem(
     recipe: Recipe,
     isAdded: Boolean,
-    onClick: () -> Unit
+    onAddClick: () -> Unit,
+    onRecipeClick: () -> Unit   // Новый параметр для клика по карточке
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .clickable { onRecipeClick() },  // Добавляем обработчик клика на всю карточку
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -375,7 +415,7 @@ fun RecipeListItem(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 16.dp) // Отступ от кнопки
+                    .padding(end = 16.dp)
             ) {
                 Text(
                     text = recipe.name,
@@ -383,14 +423,12 @@ fun RecipeListItem(
                     color = if (isAdded) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     else MaterialTheme.colorScheme.onSurface
                 )
-
                 Text(
                     text = "Категория: ${recipe.category.name}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
                 )
-
                 recipe.description?.let { description ->
                     Text(
                         text = description,
@@ -399,7 +437,6 @@ fun RecipeListItem(
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
-
                 if (isAdded) {
                     Text(
                         text = "Уже добавлено",
@@ -412,7 +449,7 @@ fun RecipeListItem(
 
             if (!isAdded) {
                 IconButton(
-                    onClick = onClick,
+                    onClick = onAddClick,
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
@@ -425,6 +462,7 @@ fun RecipeListItem(
         }
     }
 }
+
 
 @Composable
 fun PortionsDialog(onConfirm: (Int) -> Unit, onDismiss: () -> Unit) {
