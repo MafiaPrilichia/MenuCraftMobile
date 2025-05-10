@@ -1,6 +1,7 @@
 package com.example.menucraft
 
 import android.app.Activity.RESULT_OK
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,8 +21,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -53,22 +57,28 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import com.example.menucraft.data.Event
 import com.example.menucraft.data.EventCRUD
+import com.example.menucraft.data.EventIngredientShow
 import com.example.menucraft.data.EventRecipe
 import com.example.menucraft.data.EventRecipeShow
 import com.example.menucraft.util.RetrofitInstance
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import org.apache.poi.ss.usermodel.BorderStyle
+import org.apache.poi.ss.usermodel.HorizontalAlignment
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import java.io.File
+import java.io.FileOutputStream
 import java.time.format.DateTimeFormatter
 
 class EventActivity : FragmentActivity() {
-    @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -84,6 +94,7 @@ class EventActivity : FragmentActivity() {
             lifecycleScope.launch {
                 viewModel.getEventByID(eventId, authToken)
                 viewModel.getEventRecipes(eventId, authToken)
+                viewModel.loadIngredientsForEvent(eventId, authToken)
             }
         }
 
@@ -94,6 +105,16 @@ class EventActivity : FragmentActivity() {
                 lifecycleScope.launch {
                     viewModel.getEventByID(eventId, authToken)
                     viewModel.getEventRecipes(eventId, authToken)
+                }
+            }
+        }
+        val recipeLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == RESULT_OK) {
+                lifecycleScope.launch {
+                    viewModel.getEventRecipes(eventId, authToken)
+                    viewModel.loadIngredientsForEvent(eventId, authToken)
                 }
             }
         }
@@ -112,6 +133,13 @@ class EventActivity : FragmentActivity() {
                         putExtra("added_recipe_ids", viewModel.recipes.value.map { it.recipe.id }.toLongArray())
                     }
                     recipeListLauncher.launch(intent)
+                },
+                onRecipeClick = { recipeId ->
+                    val intent = Intent(this, RecipeActivity::class.java).apply {
+                        putExtra("recipe_id", recipeId)
+                        putExtra("jwt_token", authToken)
+                    }
+                    recipeLauncher.launch(intent)
                 }
             )
         }
@@ -128,10 +156,12 @@ fun EventScreen(
     authToken: String,
     onEventDeleted: () -> Unit,
     refresh: () -> Unit,
-    onAddRecipeClick: () -> Unit
+    onAddRecipeClick: () -> Unit,
+    onRecipeClick: (Long) -> Unit
 ) {
     val event by viewModel.eventDetails.collectAsState(initial = null)
     val recipes by viewModel.recipes.collectAsState()
+    val ingredients by viewModel.ingredients.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
@@ -159,6 +189,7 @@ fun EventScreen(
             try {
                 viewModel.getEventByID(eventId, authToken)
                 viewModel.getEventRecipes(eventId, authToken)
+                viewModel.loadIngredientsForEvent(eventId, authToken)
             } catch (e: Exception) {
                 errorMessage = "Ошибка при загрузке мероприятия"
             } finally {
@@ -181,6 +212,19 @@ fun EventScreen(
                         expanded = expandedMenu,
                         onDismissRequest = { expandedMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Поделиться") },
+                            onClick = {
+                                val file =
+                                    event?.let {
+                                        generateExcelFile(context,
+                                            it, recipes, ingredients)
+                                    }
+                                if (file != null) {
+                                    shareFile(context, file)
+                                }
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Редактировать") },
                             onClick = {
@@ -209,11 +253,21 @@ fun EventScreen(
                 CircularProgressIndicator()
             }
         } else if (event != null) {
-            Column(modifier = Modifier.padding(innerPadding).padding(16.dp)) {
+            val scrollState = rememberScrollState()
+
+            Column(modifier = Modifier
+                .verticalScroll(scrollState)
+                .padding(innerPadding)
+                .padding(16.dp)) {
+
+                // --- Характеристики мероприятия ---
                 Text(text = "Тема: ${event?.theme}", fontSize = 16.sp)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text(text = "Дата: ${event?.eventDate?.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))}", fontSize = 14.sp)
+                Text(
+                    text = "Дата: ${event?.eventDate?.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))}",
+                    fontSize = 14.sp
+                )
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(text = "Локация: ${event?.location}", fontSize = 14.sp)
@@ -223,17 +277,13 @@ fun EventScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(text = "Описание: ${event?.description}", fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(text = "Дата создания: ${event?.createdAt?.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))}", fontSize = 14.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(text = "Дата обновления: ${event?.updatedAt?.format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))}", fontSize = 14.sp)
 
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(text = "Блюда:", fontSize = 16.sp)
 
+                // --- Список блюд ---
                 if (recipes.isEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(text = "Блюда не добавлены", fontSize = 14.sp)
                 } else {
                     Column {
@@ -246,6 +296,9 @@ fun EventScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 8.dp)
+                                    .clickable {
+                                        onRecipeClick(item.recipe.id)
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -274,7 +327,9 @@ fun EventScreen(
                                         Text(
                                             text = "Категория: ${item.recipe.category.name}",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.8f
+                                            ),
                                             modifier = Modifier.padding(top = 4.dp)
                                         )
                                     }
@@ -311,7 +366,6 @@ fun EventScreen(
                     }
                 }
 
-
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Button(onClick = {
@@ -321,8 +375,56 @@ fun EventScreen(
                         putExtra("added_recipe_ids", recipes.map { it.recipe.id }.toLongArray())
                     }
                     launcher.launch(intent) // <--- правильно
-                }) {
+                },
+                    modifier = Modifier.fillMaxWidth()) {
                     Text("Добавить блюдо")
+                }
+
+                Spacer(modifier = Modifier.height(30.dp))
+
+                if (recipes.isNotEmpty()) {
+                    if (ingredients.isEmpty()) {
+                        Text(text = "Нет ингредиентов")
+                    } else {
+                        Text(text = "Всего ингредиентов:", fontSize = 16.sp)
+                        ingredients.forEach { item ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 16.dp)
+                                    ) {
+                                        Text(
+                                            text = item.ingredient.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+
+                                        Text(
+                                            text = "Количество: ${item.amount} ${item.unit.name}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -425,6 +527,174 @@ fun EventScreen(
     }
 }
 
+fun generateExcelFile(
+    context: Context,
+    event: Event,
+    recipes: List<EventRecipeShow>,
+    ingredients: List<EventIngredientShow>
+): File {
+    val workbook = XSSFWorkbook()
+    val sheet = workbook.createSheet("Мероприятие")
+
+    var rowIndex = 0
+
+    // 1. Информация о мероприятии
+    val boldFont = workbook.createFont().apply {
+        bold = true
+    }
+
+    val titleFont = workbook.createFont().apply {
+        bold = true
+        fontHeightInPoints = 14
+    }
+
+    val titleStyle = workbook.createCellStyle().apply {
+        setFont(titleFont)
+    }
+
+    val headerStyle = workbook.createCellStyle().apply {
+        setFont(boldFont)
+        borderTop = BorderStyle.THIN
+        borderBottom = BorderStyle.THIN
+        borderLeft = BorderStyle.THIN
+        borderRight = BorderStyle.THIN
+        alignment = HorizontalAlignment.CENTER
+    }
+
+    val borderedStyle = workbook.createCellStyle().apply {
+        borderTop = BorderStyle.THIN
+        borderBottom = BorderStyle.THIN
+        borderLeft = BorderStyle.THIN
+        borderRight = BorderStyle.THIN
+    }
+
+    val dateCellStyle = workbook.createCellStyle().apply {
+        val createHelper = workbook.creationHelper
+        dataFormat = createHelper.createDataFormat().getFormat("dd.MM.yyyy HH:mm")
+    }
+
+    // 1. Информация о мероприятии
+    fun labelAndValue(label: String, value: String) {
+        val row = sheet.createRow(rowIndex++)
+        row.createCell(0).apply {
+            setCellValue(label)
+            cellStyle = boldFont.let {
+                workbook.createCellStyle().apply {
+                    setFont(it)
+                }
+            }
+        }
+        row.createCell(1).apply {
+            setCellValue(value)
+        }
+    }
+
+    labelAndValue("Название мероприятия:", event.name)
+    labelAndValue("Тема:", event.theme)
+
+    val dateRow = sheet.createRow(rowIndex++)
+    dateRow.createCell(0).apply {
+        setCellValue("Дата:")
+        cellStyle = workbook.createCellStyle().apply {
+            setFont(boldFont)
+        }
+    }
+    dateRow.createCell(1).apply {
+        setCellValue(event.eventDate)
+        cellStyle = dateCellStyle
+    }
+
+    labelAndValue("Место проведения:", event.location)
+    labelAndValue("Описание:", event.description)
+
+    rowIndex++ // пустая строка
+
+// 2. Список блюд
+    sheet.createRow(rowIndex++).createCell(0).apply {
+        setCellValue("Список блюд")
+        cellStyle = titleStyle
+    }
+
+    val headerRecipe = sheet.createRow(rowIndex++)
+    listOf("Название", "Категория", "Порции").forEachIndexed { i, title ->
+        headerRecipe.createCell(i).apply {
+            setCellValue(title)
+            cellStyle = headerStyle
+        }
+    }
+
+    recipes.forEach { recipe ->
+        val row = sheet.createRow(rowIndex++)
+        row.createCell(0).apply {
+            setCellValue(recipe.recipe.name)
+            cellStyle = borderedStyle
+        }
+        row.createCell(1).apply {
+            setCellValue(recipe.recipe.category.name)
+            cellStyle = borderedStyle
+        }
+        row.createCell(2).apply {
+            setCellValue(recipe.portions.toDouble())
+            cellStyle = borderedStyle
+        }
+    }
+
+    rowIndex++ // пустая строка
+
+// 3. Список ингредиентов
+    sheet.createRow(rowIndex++).createCell(0).apply {
+        setCellValue("Список ингредиентов")
+        cellStyle = titleStyle
+    }
+
+    val headerIng = sheet.createRow(rowIndex++)
+    listOf("Название", "Количество", "Единица").forEachIndexed { i, title ->
+        headerIng.createCell(i).apply {
+            setCellValue(title)
+            cellStyle = headerStyle
+        }
+    }
+
+    ingredients.forEach { ingredient ->
+        val row = sheet.createRow(rowIndex++)
+        row.createCell(0).apply {
+            setCellValue(ingredient.ingredient.name)
+            cellStyle = borderedStyle
+        }
+        row.createCell(1).apply {
+            setCellValue(ingredient.amount.toDouble())
+            cellStyle = borderedStyle
+        }
+        row.createCell(2).apply {
+            setCellValue(ingredient.unit.name)
+            cellStyle = borderedStyle
+        }
+    }
+
+
+    val file = File(context.cacheDir, "event_${event.name}.xlsx")
+    FileOutputStream(file).use { workbook.write(it) }
+    workbook.close()
+
+    return file
+}
+
+
+fun shareFile(context: Context, file: File) {
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.provider",
+        file
+    )
+
+    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    context.startActivity(Intent.createChooser(shareIntent, "Поделиться рецептом"))
+}
 
 
 
@@ -524,7 +794,12 @@ class EventViewModel : ViewModel() {
         }
     }
 
-    fun updateRecipePortions(eventRecipe: EventRecipeShow, newPortions: Int, authToken: String, onSuccess: () -> Unit) {
+    fun updateRecipePortions(
+        eventRecipe: EventRecipeShow,
+        newPortions: Int,
+        authToken: String,
+        onSuccess: () -> Unit
+    ) {
         viewModelScope.launch {
             try {
                 val updatedEventRecipe = EventRecipe(
@@ -553,6 +828,23 @@ class EventViewModel : ViewModel() {
                 }
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Ошибка при обновлении порций: ${e.message}", e)
+            }
+        }
+    }
+
+
+    private val _ingredients = MutableStateFlow<List<EventIngredientShow>>(emptyList())
+    val ingredients: StateFlow<List<EventIngredientShow>> = _ingredients
+
+    fun loadIngredientsForEvent(eventId: Long, authToken: String) {
+        viewModelScope.launch {
+            try {
+                val ingredientsResponse = apiService.getIngredientsByEventId(eventId, "Bearer $authToken")
+                _ingredients.value = ingredientsResponse
+
+                Log.d("EventViewModel", "${_ingredients.value.size}")
+            } catch (e: Exception) {
+                Log.e("EventViewModel", "Ошибка получения ингредиентов", e)
             }
         }
     }

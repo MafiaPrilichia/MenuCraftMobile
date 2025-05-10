@@ -9,11 +9,30 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.annotation.RequiresApi
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -22,8 +41,12 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.menucraft.data.Category
+import com.example.menucraft.data.Ingredient
 import com.example.menucraft.data.Recipe
 import com.example.menucraft.data.RecipeCRUD
+import com.example.menucraft.data.RecipeIngredientCRUD
+import com.example.menucraft.data.RecipeIngredientShow
+import com.example.menucraft.data.Unit
 import com.example.menucraft.util.RetrofitInstance
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,8 +84,8 @@ class CreateRecipeActivity : ComponentActivity() {
 fun CreateRecipeScreen(
     viewModel: RecipeViewModel,
     authToken: String,
-    onCreated: (Boolean) -> Unit,
-    onNavigateBack: () -> Unit
+    onCreated: (Boolean) -> kotlin.Unit,
+    onNavigateBack: () -> kotlin.Unit
 ) {
     val context = LocalContext.current
     val showDialog = remember { mutableStateOf(false) }
@@ -235,7 +258,7 @@ class RecipeViewModel : ViewModel() {
         }
     }
 
-    fun createRecipe(authToken: String, recipe: RecipeCRUD, onSuccess: () -> Unit) {
+    fun createRecipe(authToken: String, recipe: RecipeCRUD, onSuccess: () -> kotlin.Unit) {
         viewModelScope.launch {
             try {
                 val response = apiService.createRecipe("Bearer $authToken", recipe)
@@ -264,7 +287,7 @@ class RecipeViewModel : ViewModel() {
         }
     }
 
-    fun deleteRecipe(authToken: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+    fun deleteRecipe(authToken: String, onSuccess: () -> kotlin.Unit, onError: (String) -> kotlin.Unit): kotlin.Unit {
         val id = _recipe.value?.id ?: return
         viewModelScope.launch {
             try {
@@ -272,10 +295,166 @@ class RecipeViewModel : ViewModel() {
                 if (response.isSuccessful) {
                     onSuccess()
                 } else {
-                    onError("Ошибка удаления")
+                    onError(response.errorBody()?.string().toString())
                 }
             } catch (e: Exception) {
                 onError("Ошибка сети")
+            }
+        }
+    }
+
+    private val _ingredientsForRecipe = MutableStateFlow<List<RecipeIngredientShow>>(emptyList())
+    val ingredientsForRecipe: StateFlow<List<RecipeIngredientShow>> = _ingredientsForRecipe
+
+    fun loadIngredientsForRecipe(recipeId: Long, authToken: String) {
+        viewModelScope.launch {
+            try {
+                val ingredientsResponse = apiService.getIngredientsByRecipeId(recipeId, "Bearer $authToken")
+                _ingredientsForRecipe.value = ingredientsResponse
+            } catch (e: Exception) {
+                Log.e("RecipeViewModel", "Ошибка получения ингредиентов", e)
+            }
+        }
+    }
+
+
+    private val _ingredients = MutableStateFlow<List<Ingredient>>(emptyList())
+    val ingredients: StateFlow<List<Ingredient>> = _ingredients
+
+    fun loadIngredients(authToken: String) {
+        viewModelScope.launch {
+            try {
+                val ingredientsResponse = apiService.getIngredients("Bearer $authToken")
+                _ingredients.value = ingredientsResponse
+            } catch (e: Exception) {
+                Log.e("RecipeViewModel", "Ошибка получения ингредиентов", e)
+            }
+        }
+    }
+
+
+    private val _units = MutableStateFlow<List<Unit>>(emptyList())
+    val units: StateFlow<List<Unit>> = _units
+
+    fun loadUnits(authToken: String) {
+        viewModelScope.launch {
+            try {
+                val unitsResponse = apiService.getUnits("Bearer $authToken")
+                _units.value = unitsResponse
+            } catch (e: Exception) {
+                Log.e("RecipeViewModel", "Ошибка получения мер измерения", e)
+            }
+        }
+    }
+
+    fun addIngredientToRecipe(authToken: String, recipeIngredient: RecipeIngredientCRUD, onSuccess: () -> kotlin.Unit): kotlin.Unit {
+        viewModelScope.launch {
+            try {
+                val response = apiService.createRecipeIngredient("Bearer $authToken", recipeIngredient)
+                if (response.isSuccessful) {
+                    onSuccess()
+                } else {
+                    Log.e("RecipeViewModel", "Ошибка добавления ингредиента: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.e("RecipeViewModel", "Ошибка при добавлении ингредиента: ${e.message}", e)
+            }
+        }
+    }
+
+    fun deleteIngredientFromRecipe(recipeId: Long, ingredientId: Long, authToken: String, onSuccess: () -> kotlin.Unit) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.deleteRecipeIngredient(
+                    auth = "Bearer $authToken",
+                    recipeId = recipeId.toInt(),
+                    ingredientId = ingredientId.toInt()
+                )
+                if (response.isSuccessful) {
+                    onSuccess()
+                } else {
+                    Log.e("RecipeViewModel", "Ошибка при удалении ингредиента: ${response.code()} - ${response.errorBody()
+                        ?.string()}")
+                }
+            } catch (e: Exception) {
+                Log.e("RecipeViewModel", "Ошибка при удалении ингредиента: ${e.message}", e)
+            }
+        }
+    }
+
+    fun updateRecipeIngredient(
+        updatedIngredient: RecipeIngredientCRUD,
+        authToken: String,
+        onSuccess: () -> kotlin.Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                // Отправляем обновлённый ингредиент на сервер
+                val response = apiService.updateRecipeIngredient(
+                    auth = "Bearer $authToken",
+                    body = updatedIngredient
+                )
+                if (response.isSuccessful) {
+                    // Обновляем локальное состояние ингредиентов
+                    _ingredientsForRecipe.value = _ingredientsForRecipe.value.map { ingredient ->
+                        (if (ingredient.ingredient.id == updatedIngredient.ingredientId) {
+                            _units.value.find{ it.id == updatedIngredient.unitId}?.let {
+                                ingredient.copy(
+                                    unit = it,
+                                    amount = updatedIngredient.amount.toBigDecimal()
+                                )
+                            }
+                        } else {
+                            ingredient
+                        })!!
+                    }
+                    // Загружаем свежие данные с сервера (например, список ингредиентов)
+                    loadIngredientsForRecipe(updatedIngredient.recipeId, authToken)
+                    onSuccess()
+                } else {
+                    Log.e("RecipeIngredientViewModel", "Ошибка при обновлении ингредиента: ${response.code()} - ${response.errorBody()
+                        ?.string()}")
+                }
+            } catch (e: Exception) {
+                Log.e("RecipeIngredientViewModel", "Ошибка при обновлении ингредиента: ${e.message}", e)
+            }
+        }
+    }
+
+    fun updateRecipe(recipeId: Long, authToken: String, updatedRecipe: RecipeCRUD, onResult: (Boolean) -> kotlin.Unit) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.updateRecipe(recipeId, "Bearer $authToken", updatedRecipe)
+                if (response.isSuccessful) {
+                    _recipe.value = response.body()
+                    onResult(true)
+                } else {
+                    onResult(false)
+                    Log.e("RecipeViewModel", "Ошибка обновления: ${response.code()} - ${response.errorBody()
+                        ?.string()}")
+                }
+            } catch (e: Exception) {
+                onResult(false)
+                Log.e("RecipeViewModel", "Ошибка при обновлении блюда: ${e.message}", e)
+            }
+        }
+    }
+
+    fun saveRecipeFromAnotherUser(id: Long, authToken: String, onResult: (Long?) -> kotlin.Unit) {
+        viewModelScope.launch {
+            try {
+                Log.d("RecipeViewModel", "$id")
+                val response = apiService.saveRecipeFromAnotherUser("Bearer $authToken", id)
+                if (response.isSuccessful) {
+                    val newRecipeId = response.body()
+                    onResult(newRecipeId)
+                } else {
+                    onResult(null)
+                    Log.e("RecipeViewModel", "Ошибка сохранения рецепта: ${response.code()} - ${response.errorBody()?.string()}")
+                }
+            } catch (e: Exception) {
+                onResult(null)
+                Log.e("RecipeViewModel", "Ошибка при сохранении рецепта: ${e.message}", e)
             }
         }
     }

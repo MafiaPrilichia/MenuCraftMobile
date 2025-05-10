@@ -20,7 +20,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -44,6 +48,7 @@ import com.example.menucraft.data.EventShort
 import com.example.menucraft.util.RetrofitInstance
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 class OwnedEventActivity : ComponentActivity() {
@@ -61,6 +66,7 @@ class OwnedEventActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun OwnedEventScreen(authToken: String, vm: OwnedEventViewModel = viewModel()) {
@@ -68,6 +74,9 @@ fun OwnedEventScreen(authToken: String, vm: OwnedEventViewModel = viewModel()) {
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf("") }
     val context = LocalContext.current
+
+    var expanded by remember { mutableStateOf(false) }
+    var showLogoutDialog by remember { mutableStateOf(false) }
 
     var shouldRefresh by remember { mutableStateOf(false) }
 
@@ -95,6 +104,32 @@ fun OwnedEventScreen(authToken: String, vm: OwnedEventViewModel = viewModel()) {
     }
 
     Scaffold(
+        topBar = {
+            androidx.compose.material3.TopAppBar(
+                title = { Text("Мои мероприятия") },
+                actions = {
+                    androidx.compose.material3.IconButton(onClick = { expanded = true }) {
+                        androidx.compose.material3.Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
+                            contentDescription = "Меню"
+                        )
+                        DropdownMenu(
+                            expanded = expanded,
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Выйти") },
+                                onClick = {
+                                    expanded = false
+                                    showLogoutDialog = true
+                                }
+                            )
+                        }
+                    }
+                }
+            )
+        },
+
         floatingActionButton = {
             androidx.compose.material3.FloatingActionButton(
                 onClick = {
@@ -142,6 +177,36 @@ fun OwnedEventScreen(authToken: String, vm: OwnedEventViewModel = viewModel()) {
             }
         }
     }
+
+    if (showLogoutDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showLogoutDialog = false },
+            title = { Text("Выход") },
+            text = { Text("Вы уверены, что хотите выйти?") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val intent = Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    }
+                    context.getSharedPreferences("app_prefs", 0)
+                        .edit()
+                        .remove("jwt_token")
+                        .apply()
+                    context.startActivity(intent)
+                }) {
+                    Text("Да")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showLogoutDialog = false
+                }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
 }
 
 
@@ -149,8 +214,6 @@ fun OwnedEventScreen(authToken: String, vm: OwnedEventViewModel = viewModel()) {
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun EventItem(event: EventShort, onClick: () -> Unit) { // <-- Исправили тип onClick
-    val formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
-    val formattedDate = event.eventDate.format(formatter)
 
     Surface(
         modifier = Modifier
@@ -168,7 +231,7 @@ fun EventItem(event: EventShort, onClick: () -> Unit) { // <-- Исправил�
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Тема: ${event.theme}",
                 fontSize = 14.sp,
@@ -177,9 +240,9 @@ fun EventItem(event: EventShort, onClick: () -> Unit) { // <-- Исправил�
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Дата: $formattedDate",
+                text = "Дата: ${LocalDateTime.parse(event.eventDate).format(DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm"))}",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.Gray

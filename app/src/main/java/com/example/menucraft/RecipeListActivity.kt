@@ -1,6 +1,5 @@
 package com.example.menucraft
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -73,11 +72,19 @@ class RecipeListActivity : ComponentActivity() {
 
     private val viewModel: RecipeListViewModel by viewModels()
 
+    private val recipeLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val authToken = intent.getStringExtra("jwt_token") ?: ""
+            viewModel.loadRecipes(authToken)
+        }
+    }
+
     private val createRecipeLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            // Рецепт создан, обновляем список
+        if (result.resultCode == RESULT_OK) {
             val authToken = intent.getStringExtra("jwt_token") ?: ""
             viewModel.loadRecipes(authToken)
         }
@@ -107,17 +114,6 @@ class RecipeListActivity : ComponentActivity() {
             var dropdownExpanded by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
 
-            // Флаг для обновления EventActivity
-            var needsRefresh by remember { mutableStateOf(false) }
-
-            // Обработка результата для обновления EventActivity
-            if (needsRefresh) {
-                LaunchedEffect(Unit) {
-                    setResult(Activity.RESULT_OK)
-                    needsRefresh = false
-                }
-            }
-
             LaunchedEffect(authToken) {
                 viewModel.loadCategories(authToken)
                 viewModel.loadRecipes(authToken)
@@ -142,16 +138,17 @@ class RecipeListActivity : ComponentActivity() {
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.padding(16.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Добавить рецепт"
-                        )
+                        Icon(Icons.Default.Add, contentDescription = "Добавить рецепт")
                     }
                 }
             ) { paddingValues ->
-                Box(modifier = Modifier.padding(paddingValues)) {
-                    Column {
-                        // Выпадающий список с множественным выбором
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    item {
                         ExposedDropdownMenuBox(
                             expanded = dropdownExpanded,
                             onExpandedChange = { dropdownExpanded = it }
@@ -159,16 +156,14 @@ class RecipeListActivity : ComponentActivity() {
                             OutlinedTextField(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
                                     .menuAnchor(),
                                 readOnly = true,
                                 value = if (selectedCategoryIds.isEmpty()) {
                                     "Все категории"
                                 } else {
-                                    val selectedNames = categories
-                                        .filter { selectedCategoryIds.contains(it.id) }
+                                    categories.filter { selectedCategoryIds.contains(it.id) }
                                         .joinToString(", ") { it.name }
-                                    if (selectedNames.isEmpty()) "Все категории" else "Выбрано: $selectedNames"
+                                        .ifEmpty { "Все категории" }
                                 },
                                 onValueChange = {},
                                 label = { Text("Фильтр по категориям") },
@@ -194,10 +189,7 @@ class RecipeListActivity : ComponentActivity() {
                                             viewModel.loadRecipes(authToken, newSelected.toList())
                                         },
                                         leadingIcon = {
-                                            if (isSelected) Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null
-                                            )
+                                            if (isSelected) Icon(Icons.Default.Check, contentDescription = null)
                                         }
                                     )
                                 }
@@ -205,82 +197,83 @@ class RecipeListActivity : ComponentActivity() {
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
+                    }
 
-                        when {
-                            isLoading -> {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator()
-                                }
-                            }
-                            errorMessage.isNotEmpty() -> {
-                                Text(
-                                    text = errorMessage,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                )
-                            }
-                            else -> {
-                                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                    items(recipes) { recipe ->
-                                        RecipeListItem(
-                                            recipe = recipe,
-                                            isAdded = addedRecipeIds.contains(recipe.id),
-                                            onAddClick = {
-                                                if (!addedRecipeIds.contains(recipe.id)) {
-                                                    selectedRecipeShort = recipe
-                                                    showDialog = true
-                                                }
-                                            },
-                                            onRecipeClick = {
-                                                // Переход на RecipeActivity с передачей ID рецепта
-                                                val intent = Intent(context, RecipeActivity::class.java)
-                                                intent.putExtra("recipe_id", recipe.id)
-                                                context.startActivity(intent)
-                                            }
-                                        )
-                                    }
-                                }
+                    when {
+                        isLoading -> item {
+                            Box(
+                                modifier = Modifier
+                                    .fillParentMaxSize()
+                                    .padding(top = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
                             }
                         }
 
-                        if (showDialog && selectedRecipeShort != null) {
-                            PortionsDialog(
-                                onConfirm = { portions ->
-                                    showDialog = false
-                                    scope.launch {
-                                        viewModel.addRecipeToEvent(
-                                            authToken,
-                                            eventId,
-                                            selectedRecipeShort!!.id,
-                                            portions,
-                                            onSuccess = {
-                                                Toast.makeText(context, "Блюдо добавлено", Toast.LENGTH_SHORT).show()
-                                                // Обновляем список рецептов
-                                                viewModel.loadRecipes(authToken)
-                                                // Обновляем список добавленных рецептов
-                                                viewModel.loadAddedRecipes(eventId, authToken)
-                                                // Устанавливаем флаг для обновления EventActivity
-                                                needsRefresh = true
-                                            },
-                                            onError = { errorMsg ->
-                                                Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    }
-                                },
-                                onDismiss = { showDialog = false }
+                        errorMessage.isNotEmpty() -> item {
+                            Text(
+                                text = errorMessage,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp)
                             )
                         }
+
+                        else -> {
+                            items(recipes) { recipe ->
+                                RecipeListItem(
+                                    recipe = recipe,
+                                    isAdded = addedRecipeIds.contains(recipe.id),
+                                    onAddClick = {
+                                        if (!addedRecipeIds.contains(recipe.id)) {
+                                            selectedRecipeShort = recipe
+                                            showDialog = true
+                                        }
+                                    },
+                                    onRecipeClick = {
+                                        val intent = Intent(context, RecipeActivity::class.java).apply {
+                                            putExtra("recipe_id", recipe.id)
+                                            putExtra("jwt_token", authToken)
+                                        }
+                                        recipeLauncher.launch(intent)
+                                    }
+                                )
+                            }
+                        }
                     }
+                }
+
+                if (showDialog && selectedRecipeShort != null) {
+                    PortionsDialog(
+                        onConfirm = { portions ->
+                            showDialog = false
+                            scope.launch {
+                                viewModel.addRecipeToEvent(
+                                    authToken,
+                                    eventId,
+                                    selectedRecipeShort!!.id,
+                                    portions,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Блюдо добавлено", Toast.LENGTH_SHORT).show()
+                                        viewModel.loadRecipes(authToken)
+                                        viewModel.loadAddedRecipes(eventId, authToken)
+                                        setResult(RESULT_OK)
+                                    },
+                                    onError = { errorMsg ->
+                                        Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        },
+                        onDismiss = { showDialog = false }
+                    )
                 }
             }
         }
     }
 }
+
 
 
 
@@ -397,7 +390,7 @@ fun RecipeListItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(vertical = 8.dp)
             .clickable { onRecipeClick() },  // Добавляем обработчик клика на всю карточку
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
@@ -429,14 +422,18 @@ fun RecipeListItem(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
                 )
-                recipe.description?.let { description ->
-                    Text(
-                        text = description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
+                Text(
+                    text = "Пользователь: ${recipe.user.username}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                Text(
+                    text = recipe.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
                 if (isAdded) {
                     Text(
                         text = "Уже добавлено",

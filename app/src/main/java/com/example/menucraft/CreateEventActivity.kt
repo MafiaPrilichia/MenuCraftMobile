@@ -108,6 +108,17 @@ fun CreateEventScreen(
         }
     )
 
+    val allFieldsFilled by remember {
+        derivedStateOf {
+            val guests = guestsText.toIntOrNull()
+            name.isNotBlank() &&
+                    theme.isNotBlank() &&
+                    location.isNotBlank() &&
+                    description.isNotBlank() &&
+                    guests != null && guests > 0
+        }
+    }
+
     Column(modifier = Modifier.padding(16.dp)) {
         OutlinedTextField(
             value = name,
@@ -135,7 +146,9 @@ fun CreateEventScreen(
         )
         OutlinedTextField(
             value = guestsText,
-            onValueChange = { guestsText = it },
+            onValueChange = { newValue ->
+                guestsText = newValue.filter { it.isDigit() }
+            },
             label = { Text("Количество гостей") },
             keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
@@ -177,22 +190,25 @@ fun CreateEventScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Button(onClick = {
-            val guests = guestsText.toIntOrNull() ?: 0
-            val newEvent = EventCRUD(
-                name = name,
-                theme = theme,
-                eventDate = selectedDate,
-                location = location,
-                description = description,
-                guests = guests
-            )
-
-            viewModel.createEvent(authToken, newEvent) {
-                Log.d("CreateEventScreen", "Мероприятие создано")
-                onCreated(true)
-            }
-        }) {
+        Button(
+            onClick = {
+                val guests = guestsText.toIntOrNull() ?: return@Button // Safety check
+                val newEvent = EventCRUD(
+                    name = name,
+                    theme = theme,
+                    eventDate = selectedDate,
+                    location = location,
+                    description = description,
+                    guests = guests
+                )
+                viewModel.createEvent(authToken, newEvent) {
+                    Log.d("CreateEventScreen", "Мероприятие создано")
+                    onCreated(true)
+                }
+            },
+            enabled = allFieldsFilled,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Text("Создать мероприятие")
         }
     }
